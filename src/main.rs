@@ -1,8 +1,11 @@
+use std::str;
 use std::time::Duration;
 
 use tokio::process::Command;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+
+const ECHO_TIMES: usize = 4;
 
 enum Message {
     Start,
@@ -12,14 +15,23 @@ enum Message {
 
 async fn ping(ip: &str) -> bool {
     let output = Command::new("ping")
+        .arg("-n")
+        .arg(ECHO_TIMES.to_string().as_str())
         .arg("-w")
-        .arg("1")
+        .arg("50")
         .arg(ip)
         .output()
         .await
         .expect("failed to execute process");
+    let string = str::from_utf8(&output.stdout).unwrap();
 
-    output.status.success()
+    let count = string
+        .lines()
+        .filter(|&line| line.contains("Request timed out."))
+        .count();
+
+    // We send 4 echo request, if all is Request timed out. it means that IP has no device connected.
+    count != ECHO_TIMES
 }
 
 async fn scan_subnet(subnet: &str, start_ip: u32, end_ip: u32, tx: UnboundedSender<Message>) {
@@ -85,7 +97,7 @@ async fn main() {
 
     loop {
         scan_subnet("192.168.100", 1, 254, tx.clone()).await;
-        tokio::time::sleep(Duration::from_secs(2)).await;
         println!("\n");
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
