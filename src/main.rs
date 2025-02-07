@@ -1,9 +1,17 @@
+use std::time::Duration;
+
 use tokio::process::Command;
+use tokio::select;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+
+enum Message {
+    Start,
+    Collect(String),
+    End,
+}
 
 async fn ping(ip: &str) -> bool {
     let output = Command::new("ping")
-        .arg("-n")
-        .arg("2")
         .arg("-w")
         .arg("1")
         .arg(ip)
@@ -14,14 +22,16 @@ async fn ping(ip: &str) -> bool {
     output.status.success()
 }
 
-async fn scan_subnet(subnet: &str, start_ip: u32, end_ip: u32) {
+async fn scan_subnet(subnet: &str, start_ip: u32, end_ip: u32, tx: UnboundedSender<Message>) {
     let mut tasks = Vec::new();
+    tx.send(Message::Start).unwrap();
 
     for i in start_ip..=end_ip {
         let ip = format!("{}.{}", subnet, i);
+        let tx_inner = tx.clone();
         let task = tokio::spawn(async move {
             if ping(&ip).await {
-                println!("Device found: {}", ip);
+                tx_inner.send(Message::Collect(ip)).unwrap();
             }
         });
 
@@ -31,9 +41,51 @@ async fn scan_subnet(subnet: &str, start_ip: u32, end_ip: u32) {
     for join in tasks {
         join.await.unwrap();
     }
+    tx.send(Message::End).unwrap();
+}
+
+async fn monitor_connections(mut rx: UnboundedReceiver<Message>) {
+    tokio::spawn(async move {
+        let mut previous = Vec::<String>::new();
+        let mut current = Vec::<String>::new();
+
+        loop {
+            select! {
+                Some(msg) = rx.recv() => {
+                    match msg {
+                        Message::Start => {
+                            current.clear();
+                        },
+                        Message::Collect(ip) => {
+                            current.push(ip);
+                        },
+                        Message::End => {
+                            current.sort();
+                            let only_in_vec1: Vec<_> = previous.iter().filter(|&item| !current.contains(item)).collect();
+                            let only_in_vec2: Vec<_> = current.iter().filter(|&item| !previous.contains(item)).collect();
+
+                            println!("Current Connections: {:?}", current);
+                            println!("Newly Connected: {:?}", only_in_vec2) ;
+                            println!("Disconnected: {:?}", only_in_vec1) ;
+
+                            previous = current.clone();
+                        },
+                    }
+                }
+            }
+        }
+    });
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    scan_subnet("192.168.100", 1, 254).await;
+    let (tx, rx) = unbounded_channel::<Message>();
+
+    monitor_connections(rx).await;
+
+    loop {
+        scan_subnet("192.168.100", 1, 254, tx.clone()).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        println!("\n");
+    }
 }
