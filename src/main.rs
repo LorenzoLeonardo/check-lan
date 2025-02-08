@@ -1,6 +1,6 @@
 use std::net::Ipv4Addr;
-use std::str;
 use std::time::Duration;
+use std::{env, str};
 
 use tokio::process::Command;
 use tokio::select;
@@ -121,8 +121,19 @@ async fn start_scan(starting_ip: &str, subnet_mask: &str, tx: UnboundedSender<Me
 }
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    // Check if the required arguments are provided
+    let (starting_ip, subnet_mask) = if args.len() != 3 {
+        eprintln!("Usage: {} <starting_ip> <subnet_mask>", args[0]);
+        eprintln!("Defaulting to: (\"192.168.100.1\", \"255.255.255.0\")");
+        ("192.168.100.1".to_string(), "255.255.255.0".to_string())
+    } else {
+        (args[1].to_string(), args[2].to_string())
+    };
+
     let (tx, rx) = unbounded_channel::<Message>();
 
     monitor_connections(rx).await;
-    start_scan("192.168.100.1", "255.255.255.0", tx.clone()).await;
+    start_scan(starting_ip.as_str(), subnet_mask.as_str(), tx.clone()).await;
 }
