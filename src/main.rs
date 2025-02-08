@@ -112,15 +112,17 @@ fn get_ip_range(starting_ip: Ipv4Addr, subnet_mask: Ipv4Addr) -> Vec<Ipv4Addr> {
     ip_list
 }
 
+async fn start_scan(starting_ip: &str, subnet_mask: &str, tx: UnboundedSender<Message>) {
+    loop {
+        scan_subnet(starting_ip, subnet_mask, tx.clone()).await;
+        println!("\n");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let (tx, rx) = unbounded_channel::<Message>();
 
     monitor_connections(rx).await;
-
-    loop {
-        scan_subnet("192.168.100.1", "255.255.255.0", tx.clone()).await;
-        println!("\n");
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
+    start_scan("192.168.100.1", "255.255.255.0", tx.clone()).await;
 }
