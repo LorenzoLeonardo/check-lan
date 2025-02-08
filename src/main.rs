@@ -125,11 +125,14 @@ fn get_ip_range(starting_ip: Ipv4Addr, subnet_mask: Ipv4Addr) -> Vec<Ipv4Addr> {
     ip_list
 }
 
-async fn start_scan(starting_ip: &str, subnet_mask: &str, tx: UnboundedSender<Message>) {
+async fn start_scan(starting_ip: &str, subnet_mask: &str, tx: UnboundedSender<Message>, brk: bool) {
     loop {
         scan_subnet(starting_ip, subnet_mask, tx.clone()).await;
         println!("\n");
         tokio::time::sleep(POLL_DELAY).await;
+        if !brk {
+            break;
+        }
     }
 }
 #[tokio::main(flavor = "current_thread")]
@@ -137,16 +140,25 @@ async fn main() {
     let args: Vec<String> = env::args().collect();
 
     // Check if the required arguments are provided
-    let (starting_ip, subnet_mask) = if args.len() != 3 {
+    let (starting_ip, subnet_mask, brk) = if args.len() != 4 {
         eprintln!("Usage: {} <starting_ip> <subnet_mask>", args[0]);
         eprintln!("Defaulting to: (\"192.168.100.1\", \"255.255.255.0\")");
-        ("192.168.100.1".to_string(), "255.255.255.0".to_string())
+        (
+            "192.168.100.1".to_string(),
+            "255.255.255.0".to_string(),
+            true,
+        )
     } else {
-        (args[1].to_string(), args[2].to_string())
+        let brk = if args[3].to_string() == "0" {
+            false
+        } else {
+            true
+        };
+        (args[1].to_string(), args[2].to_string(), brk)
     };
 
     let (tx, rx) = unbounded_channel::<Message>();
 
     monitor_connections(rx).await;
-    start_scan(starting_ip.as_str(), subnet_mask.as_str(), tx.clone()).await;
+    start_scan(starting_ip.as_str(), subnet_mask.as_str(), tx.clone(), brk).await;
 }
