@@ -1,3 +1,4 @@
+use std::net::Ipv4Addr;
 use std::str;
 use std::time::Duration;
 
@@ -34,12 +35,16 @@ async fn ping(ip: &str) -> bool {
     count != ECHO_TIMES
 }
 
-async fn scan_subnet(subnet: &str, start_ip: u32, end_ip: u32, tx: UnboundedSender<Message>) {
+async fn scan_subnet(starting_ip: &str, subnet_mask: &str, tx: UnboundedSender<Message>) {
     let mut tasks = Vec::new();
+    let starting_ip: Ipv4Addr = starting_ip.parse().unwrap();
+    let subnet_mask: Ipv4Addr = subnet_mask.parse().unwrap();
+    let ip_range = get_ip_range(starting_ip, subnet_mask);
+
     tx.send(Message::Start).unwrap();
 
-    for i in start_ip..=end_ip {
-        let ip = format!("{}.{}", subnet, i);
+    for ip in ip_range {
+        let ip = ip.to_string();
         let tx_inner = tx.clone();
         let task = tokio::spawn(async move {
             if ping(&ip).await {
@@ -89,6 +94,24 @@ async fn monitor_connections(mut rx: UnboundedReceiver<Message>) {
     });
 }
 
+fn get_ip_range(starting_ip: Ipv4Addr, subnet_mask: Ipv4Addr) -> Vec<Ipv4Addr> {
+    let ip_u32 = u32::from(starting_ip);
+    let mask_u32 = u32::from(subnet_mask);
+
+    let network = ip_u32 & mask_u32;
+    let broadcast = network | !mask_u32;
+
+    let first_ip = network + 1; // First usable IP (excluding network address)
+    let last_ip = broadcast - 1; // Last usable IP (excluding broadcast address)
+
+    let mut ip_list = Vec::new();
+    for ip in first_ip..=last_ip {
+        ip_list.push(Ipv4Addr::from(ip));
+    }
+
+    ip_list
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let (tx, rx) = unbounded_channel::<Message>();
@@ -96,7 +119,7 @@ async fn main() {
     monitor_connections(rx).await;
 
     loop {
-        scan_subnet("192.168.100", 1, 254, tx.clone()).await;
+        scan_subnet("192.168.100.1", "255.255.255.0", tx.clone()).await;
         println!("\n");
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
