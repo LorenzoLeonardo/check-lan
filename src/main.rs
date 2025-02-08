@@ -7,6 +7,8 @@ use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 const ECHO_TIMES: usize = 4;
+const TIMEOUT: Duration = Duration::from_millis(1);
+const POLL_DELAY: Duration = Duration::from_secs(2);
 
 enum Message {
     Start,
@@ -15,11 +17,22 @@ enum Message {
 }
 
 async fn ping(ip: &str) -> bool {
+    let os = env::consts::OS;
+
+    let (retry, timeout) = match os {
+        "windows" => ("-n", "-w"),
+        "linux" => ("-c", "-W"),
+        _ => {
+            eprintln!("{} not supported.", os);
+            std::process::exit(0);
+        }
+    };
+
     let output = Command::new("ping")
-        .arg("-n")
+        .arg(retry)
         .arg(ECHO_TIMES.to_string().as_str())
-        .arg("-w")
-        .arg("50")
+        .arg(timeout)
+        .arg(TIMEOUT.as_millis().to_string().as_str())
         .arg(ip)
         .output()
         .await
@@ -116,7 +129,7 @@ async fn start_scan(starting_ip: &str, subnet_mask: &str, tx: UnboundedSender<Me
     loop {
         scan_subnet(starting_ip, subnet_mask, tx.clone()).await;
         println!("\n");
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(POLL_DELAY).await;
     }
 }
 #[tokio::main(flavor = "current_thread")]
